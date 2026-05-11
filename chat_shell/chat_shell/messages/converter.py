@@ -283,6 +283,36 @@ class MessageConverter:
                         {"type": "image_url", "image_url": {"url": image_url}}
                     )
 
+            elif block_type in ("video_url", "input_video"):
+                # Convert to Anthropic video format
+                # input_video from backend: {type: "input_video", video_url: "data:...;base64,...", fps: 2}
+                # video_url legacy: {type: "video_url", video_url: {url: "data:..."}}
+                if block_type == "input_video":
+                    data_uri = block.get("video_url", "")
+                else:
+                    video_url_data = block.get("video_url", {})
+                    data_uri = (
+                        video_url_data.get("url", "")
+                        if isinstance(video_url_data, dict)
+                        else ""
+                    )
+
+                if data_uri and data_uri.startswith("data:"):
+                    header, b64_data = data_uri.split(",", 1)
+                    media_type = header.split(":")[1].split(";")[0]
+                    video_block = {
+                        "type": "video",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64_data,
+                        },
+                    }
+                    fps = block.get("fps")
+                    if fps is not None:
+                        video_block["fps"] = fps
+                    image_entries.append(video_block)
+
         # Phase 2 — separate user message (last text) from context blocks
         if text_entries:
             user_msg_block = text_entries[-1]
@@ -420,11 +450,12 @@ class MessageConverter:
 
     @staticmethod
     def is_vision_message(message: dict[str, Any]) -> bool:
-        """Check if a message contains vision/image content."""
+        """Check if a message contains vision/image/video content."""
         content = message.get("content", "")
         if isinstance(content, list):
             return any(
-                isinstance(part, dict) and part.get("type") == "image_url"
+                isinstance(part, dict)
+                and part.get("type") in ("image_url", "video", "input_video")
                 for part in content
             )
         return False

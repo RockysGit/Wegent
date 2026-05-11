@@ -227,7 +227,7 @@ class AttachmentDetailResponse(AttachmentResponse):
 class AttachmentPreviewResponse(AttachmentDetailResponse):
     """Attachment preview response with extracted text snippet."""
 
-    preview_type: Literal["text", "image", "none"]
+    preview_type: Literal["text", "image", "video", "none"]
     preview_text: Optional[str] = None
     download_url: str
 

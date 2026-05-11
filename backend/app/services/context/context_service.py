@@ -67,6 +67,11 @@ class ContextService:
     # Image file extensions supported for vision models
     IMAGE_EXTENSIONS = frozenset([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"])
 
+    # Video file extensions supported for vision models
+    VIDEO_EXTENSIONS = frozenset(
+        [".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv", ".m4v"]
+    )
+
     # ==================== Helper Methods ====================
 
     @staticmethod
@@ -575,6 +580,20 @@ class ContextService:
             return False
         return context.file_extension.lower() in self.IMAGE_EXTENSIONS
 
+    def is_video_context(self, context: SubtaskContext) -> bool:
+        """
+        Check if context is a video attachment.
+
+        Args:
+            context: SubtaskContext record
+
+        Returns:
+            True if the context is a video attachment
+        """
+        if context.context_type != ContextType.ATTACHMENT.value:
+            return False
+        return context.file_extension.lower() in self.VIDEO_EXTENSIONS
+
     def build_vision_content_block(
         self,
         context: SubtaskContext,
@@ -596,6 +615,40 @@ class ContextService:
             "image_url": {
                 "url": f"data:{context.mime_type};base64,{context.image_base64}"
             },
+        }
+
+    def build_video_content_block(
+        self,
+        context: SubtaskContext,
+        db: Session,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a video content block for a video attachment.
+
+        Video binary data is read from storage and encoded to base64 on demand
+        to avoid storing large base64 strings in the database.
+
+        Args:
+            context: SubtaskContext record
+            db: Database session for reading binary data from storage
+
+        Returns:
+            Video content block dict, or None if not a video or no binary data
+        """
+        if not self.is_video_context(context):
+            return None
+
+        binary_data = self.get_attachment_binary_data(db=db, context=context)
+        if not binary_data:
+            return None
+
+        import base64
+
+        video_base64 = base64.b64encode(binary_data).decode("utf-8")
+        return {
+            "type": "input_video",
+            "video_url": f"data:{context.mime_type};base64,{video_base64}",
+            "fps": 2,
         }
 
     def build_document_text_prefix(

@@ -34,7 +34,7 @@ _MIME_TO_EXT = {
 
 
 def is_vision_prompt(prompt: Union[str, list]) -> bool:
-    """Check if a prompt contains vision content blocks.
+    """Check if a prompt contains vision/image/video content blocks.
 
     Args:
         prompt: Either a string prompt or a list of content blocks.
@@ -45,7 +45,8 @@ def is_vision_prompt(prompt: Union[str, list]) -> bool:
     if not isinstance(prompt, list) or len(prompt) == 0:
         return False
     return any(
-        isinstance(block, dict) and block.get("type") in ("input_image", "image")
+        isinstance(block, dict)
+        and block.get("type") in ("input_image", "image", "input_video")
         for block in prompt
     )
 
@@ -129,6 +130,22 @@ def convert_openai_to_anthropic_content(
                     },
                 }
             )
+
+        elif block_type == "input_video":
+            video_url = block.get("video_url", "")
+            media_type, data = _parse_data_uri(video_url)
+            video_block = {
+                "type": "video",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": data,
+                },
+            }
+            fps = block.get("fps")
+            if fps is not None:
+                video_block["fps"] = fps
+            anthropic_blocks.append(video_block)
 
         else:
             # Pass through unknown block types as-is

@@ -81,6 +81,7 @@ async def upload_attachment_open(
     - Plain text (.txt)
     - Markdown (.md)
     - Images (.jpg, .jpeg, .png, .gif, .bmp, .webp)
+    - Videos (.mp4, .mov, .avi, .webm, .mkv, .flv, .wmv, .m4v)
 
     Limits:
     - Maximum file size: 100 MB

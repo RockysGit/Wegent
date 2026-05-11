@@ -345,6 +345,7 @@ async def upload_attachment(
     - Plain text (.txt)
     - Markdown (.md)
     - Images (.jpg, .jpeg, .png, .gif, .bmp, .webp)
+    - Videos (.mp4, .mov, .avi, .webm, .mkv, .flv, .wmv, .m4v)
 
     Limits:
     - Maximum file size: 100 MB
@@ -521,6 +522,8 @@ async def get_attachment_preview(
 
     if context_service.is_image_context(context):
         preview_type = "image"
+    elif context_service.is_video_context(context):
+        preview_type = "video"
     elif context.extracted_text:
         preview_type = "text"
         # Check if it's an HTML file - return full content for HTML to enable proper preview

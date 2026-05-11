@@ -26,6 +26,18 @@ IMAGE_MIME_TYPES = {
     "image/bmp",
 }
 
+# Video MIME types that support vision
+VIDEO_MIME_TYPES = {
+    "video/mp4",
+    "video/quicktime",
+    "video/x-msvideo",
+    "video/webm",
+    "video/x-matroska",
+    "video/x-flv",
+    "video/x-ms-wmv",
+    "video/x-m4v",
+}
+
 
 class AttachmentPromptProcessor:
     """Process prompt to replace attachment references and add warnings"""

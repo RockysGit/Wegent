@@ -239,6 +239,15 @@ class DocumentParser:
         ".gif": "image/gif",
         ".bmp": "image/bmp",
         ".webp": "image/webp",
+        # Video formats
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".avi": "video/x-msvideo",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".flv": "video/x-flv",
+        ".wmv": "video/x-ms-wmv",
+        ".m4v": "video/x-m4v",
         # Archive formats (binary, no text extraction)
         ".zip": "application/zip",
     }
@@ -259,6 +268,15 @@ class DocumentParser:
         ".gif",
         ".bmp",
         ".webp",
+        # Video formats
+        ".mp4",
+        ".mov",
+        ".avi",
+        ".webm",
+        ".mkv",
+        ".flv",
+        ".wmv",
+        ".m4v",
         # Archive formats (binary, no text extraction)
         ".zip",
     }
@@ -479,6 +497,17 @@ class DocumentParser:
                 text, truncation_info = self._parse_csv_smart(binary_data, max_length)
             elif extension in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
                 text, image_base64 = self._parse_image(binary_data, extension)
+            elif extension in [
+                ".mp4",
+                ".mov",
+                ".avi",
+                ".webm",
+                ".mkv",
+                ".flv",
+                ".wmv",
+                ".m4v",
+            ]:
+                text = self._parse_video(binary_data, extension)
             elif extension == ".zip":
                 text = self._parse_archive(binary_data, extension)
             else:
@@ -500,6 +529,17 @@ class DocumentParser:
                 text = self._parse_csv(binary_data)
             elif extension in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]:
                 text, image_base64 = self._parse_image(binary_data, extension)
+            elif extension in [
+                ".mp4",
+                ".mov",
+                ".avi",
+                ".webm",
+                ".mkv",
+                ".flv",
+                ".wmv",
+                ".m4v",
+            ]:
+                text = self._parse_video(binary_data, extension)
             elif extension == ".zip":
                 text = self._parse_archive(binary_data, extension)
             else:
@@ -998,6 +1038,97 @@ class DocumentParser:
             logger.error(f"Error parsing image: {e}", exc_info=True)
             raise DocumentParseError(
                 f"Failed to parse image: {str(e)}",
+                DocumentParseError.PARSE_FAILED,
+            ) from e
+
+    def _parse_video(self, binary_data: bytes, extension: str) -> str:
+        """
+        Parse video file and return metadata information.
+
+        Video files are stored as binary attachments.
+        Metadata (file size, format) is returned as text.
+        Duration and dimensions are extracted if ffprobe is available.
+
+        Args:
+            binary_data: Video file binary data
+            extension: File extension (e.g., '.mp4', '.mov')
+
+        Returns:
+            Metadata text describing the video
+        """
+        try:
+            format_name = extension[1:].upper()
+            file_size = len(binary_data)
+            size_mb = file_size / (1024 * 1024)
+
+            text = f"[Video File]\n"
+            text += f"Format: {format_name}\n"
+            text += f"Size: {size_mb:.2f} MB ({file_size} bytes)\n"
+
+            # Try to extract video metadata using ffprobe if available
+            duration_str = "Unknown"
+            width = height = None
+            try:
+                import json
+                import subprocess
+                import tempfile
+
+                with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp:
+                    tmp.write(binary_data)
+                    tmp_path = tmp.name
+
+                try:
+                    result = subprocess.run(
+                        [
+                            "ffprobe",
+                            "-v",
+                            "error",
+                            "-select_streams",
+                            "v:0",
+                            "-show_entries",
+                            "stream=width,height,duration",
+                            "-show_entries",
+                            "format=duration",
+                            "-of",
+                            "json",
+                            tmp_path,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode == 0:
+                        probe_data = json.loads(result.stdout)
+                        streams = probe_data.get("streams", [{}])
+                        if streams:
+                            width = streams[0].get("width")
+                            height = streams[0].get("height")
+                            duration = streams[0].get("duration")
+                            if not duration:
+                                duration = probe_data.get("format", {}).get("duration")
+                            if duration:
+                                duration_sec = float(duration)
+                                mins = int(duration_sec // 60)
+                                secs = int(duration_sec % 60)
+                                duration_str = f"{mins}m {secs}s"
+                finally:
+                    import os
+
+                    os.unlink(tmp_path)
+            except Exception as e:
+                logger.debug(f"ffprobe not available or failed: {e}")
+
+            if width and height:
+                text += f"Resolution: {width}x{height}\n"
+            text += f"Duration: {duration_str}\n"
+            text += "Note: This is a video attachment."
+
+            return text
+
+        except Exception as e:
+            logger.error(f"Error parsing video: {e}", exc_info=True)
+            raise DocumentParseError(
+                f"Failed to parse video: {str(e)}",
                 DocumentParseError.PARSE_FAILED,
             ) from e
 

@@ -15,6 +15,7 @@ import {
   formatFileSize,
   getFileIcon,
   isImageExtension,
+  isVideoExtension,
   getAttachmentPreviewUrl,
 } from '@/apis/attachments'
 import { getToken } from '@/apis/user'
@@ -113,20 +114,27 @@ function AttachmentPreviewInline({
   onRemove: () => void
 }) {
   const isImage = isImageExtension(attachment.file_extension)
+  const isVideo = isVideoExtension(attachment.file_extension)
   const {
     blobUrl: imageUrl,
     isLoading: imageLoading,
     error: imageError,
   } = useAuthenticatedImageInline(attachment.id, isImage)
 
+  const containerClass = `relative flex items-center gap-2 px-2 py-1.5 rounded-lg border ${
+    attachment.status === 'ready'
+      ? 'bg-muted border-border'
+      : attachment.status === 'failed'
+        ? 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'
+        : 'bg-muted border-border'
+  }`
+
   // For images, show thumbnail preview
   if (isImage && !imageError) {
     // Show loading state
     if (imageLoading) {
       return (
-        <div
-          className={`relative flex items-center gap-2 px-2 py-1.5 rounded-lg border bg-muted border-border`}
-        >
+        <div className={containerClass}>
           <div className="relative h-10 w-10 rounded overflow-hidden border border-border flex items-center justify-center bg-muted">
             <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
           </div>
@@ -154,15 +162,7 @@ function AttachmentPreviewInline({
     // Show image once loaded
     if (imageUrl) {
       return (
-        <div
-          className={`relative flex items-center gap-2 px-2 py-1.5 rounded-lg border ${
-            attachment.status === 'ready'
-              ? 'bg-muted border-border'
-              : attachment.status === 'failed'
-                ? 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'
-                : 'bg-muted border-border'
-          }`}
-        >
+        <div className={containerClass}>
           <div className="relative h-10 w-10 rounded overflow-hidden border border-border">
             <img src={imageUrl} alt={attachment.filename} className="h-full w-full object-cover" />
           </div>
@@ -191,7 +191,38 @@ function AttachmentPreviewInline({
     }
   }
 
-  // For non-images or image load errors, show file icon
+  // For videos, show video icon
+  if (isVideo) {
+    return (
+      <div className={containerClass}>
+        <div className="relative h-10 w-10 rounded overflow-hidden border border-border flex items-center justify-center bg-muted">
+          <span className="text-lg">{getFileIcon(attachment.file_extension)}</span>
+        </div>
+        <div className="flex flex-col min-w-0 max-w-[120px]">
+          <span className="text-xs font-medium truncate" title={attachment.filename}>
+            {attachment.filename}
+          </span>
+          <span className="text-xs text-text-muted">{formatFileSize(attachment.file_size)}</span>
+        </div>
+        {attachment.status === 'parsing' && (
+          <Loader2 className="h-3 w-3 animate-spin text-primary ml-1" />
+        )}
+        {!disabled && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRemove}
+            className="h-5 w-5 ml-1 text-text-muted hover:text-text-primary"
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+    )
+  }
+
+  // For non-images and non-videos, show file icon
   return (
     <div
       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
@@ -284,7 +315,7 @@ export default function MultiFileUpload({
   const acceptString = SUPPORTED_EXTENSIONS.join(',')
 
   // Tooltip content
-  const tooltipContent = `支持的文件类型: PDF, Word, PPT, Excel, TXT, Markdown, 图片(JPG, PNG, GIF, BMP, WebP)\n最大文件大小: ${MAX_FILE_SIZE / (1024 * 1024)} MB\n支持多文件同时上传`
+  const tooltipContent = `支持的文件类型: PDF, Word, PPT, Excel, TXT, Markdown, 图片(JPG, PNG, GIF, BMP, WebP), 视频(MP4, MOV, AVI, WebM, MKV)\n最大文件大小: ${MAX_FILE_SIZE / (1024 * 1024)} MB\n支持多文件同时上传`
 
   const hasAttachments = state.attachments.length > 0
   const isUploading = state.uploadingFiles.size > 0

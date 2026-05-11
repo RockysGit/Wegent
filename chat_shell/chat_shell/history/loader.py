@@ -736,8 +736,8 @@ def _build_history_messages(
 
 
 def _build_vision_content_block(context) -> dict[str, Any] | None:
-    """Build a vision content block from a context if it's an image."""
-    if not context.mime_type or not context.mime_type.startswith("image/"):
+    """Build a vision content block from a context if it's an image or video."""
+    if not context.mime_type:
         return None
 
     if not context.binary_data:
@@ -746,12 +746,27 @@ def _build_vision_content_block(context) -> dict[str, Any] | None:
     import base64
 
     encoded_data = base64.b64encode(context.binary_data).decode("utf-8")
-    return {
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:{context.mime_type};base64,{encoded_data}",
-        },
-    }
+
+    if context.mime_type.startswith("video/"):
+        return {
+            "type": "video",
+            "source": {
+                "type": "base64",
+                "media_type": context.mime_type,
+                "data": encoded_data,
+            },
+            "fps": 2,
+        }
+
+    if context.mime_type.startswith("image/"):
+        return {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{context.mime_type};base64,{encoded_data}",
+            },
+        }
+
+    return None
 
 
 def _format_file_size(size_bytes: int) -> str:
@@ -800,25 +815,29 @@ def _build_image_metadata_header(
     task_id: int | None = None,
     subtask_id: int | None = None,
 ) -> str:
-    """Build image attachment metadata header string."""
+    """Build image or video attachment metadata header string."""
     attachment_id = context.id
-    filename = context.name or "image"
+    filename = context.name or "attachment"
     mime_type = context.mime_type or "unknown"
     file_size = context.file_size if hasattr(context, "file_size") else 0
     formatted_size = _format_file_size(file_size)
     url = _build_attachment_url(attachment_id)
+
+    # Determine if it's a video
+    is_video = mime_type.startswith("video/")
+    label = "Video Attachment" if is_video else "Image Attachment"
 
     # Build sandbox path if task_id and subtask_id are provided
     sandbox_path = _build_sandbox_path(task_id, subtask_id, filename)
 
     if sandbox_path:
         return (
-            f"[Image Attachment: {filename} | ID: {attachment_id} | "
+            f"[{label}: {filename} | ID: {attachment_id} | "
             f"Type: {mime_type} | Size: {formatted_size} | URL: {url} | "
             f"File Path in Sandbox: {sandbox_path}]"
         )
     return (
-        f"[Image Attachment: {filename} | ID: {attachment_id} | "
+        f"[{label}: {filename} | ID: {attachment_id} | "
         f"Type: {mime_type} | Size: {formatted_size} | URL: {url}]"
     )
 

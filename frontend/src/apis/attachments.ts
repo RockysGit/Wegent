@@ -145,6 +145,14 @@ export const SUPPORTED_EXTENSIONS = [
   '.gif',
   '.bmp',
   '.webp',
+  '.mp4',
+  '.mov',
+  '.avi',
+  '.webm',
+  '.mkv',
+  '.flv',
+  '.wmv',
+  '.m4v',
 ]
 
 /**
@@ -221,6 +229,14 @@ export const SUPPORTED_MIME_TYPES = [
   'image/gif',
   'image/bmp',
   'image/webp',
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/webm',
+  'video/x-matroska',
+  'video/x-flv',
+  'video/x-ms-wmv',
+  'video/x-m4v',
 ]
 
 /**
@@ -293,6 +309,15 @@ export function getFileIcon(extension: string): string {
     case '.bmp':
     case '.webp':
       return '🖼️'
+    case '.mp4':
+    case '.mov':
+    case '.avi':
+    case '.webm':
+    case '.mkv':
+    case '.flv':
+    case '.wmv':
+    case '.m4v':
+      return '🎬'
     case '.html':
     case '.htm':
     case '.html5':
@@ -317,6 +342,11 @@ export function getFileIcon(extension: string): string {
 export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
 
 /**
+ * Video file extensions
+ */
+export const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.wmv', '.m4v']
+
+/**
  * HTML file extensions
  */
 export const HTML_EXTENSIONS = ['.html', '.htm', '.html5']
@@ -327,6 +357,14 @@ export const HTML_EXTENSIONS = ['.html', '.htm', '.html5']
 export function isImageExtension(extension: string): boolean {
   const ext = extension.toLowerCase()
   return IMAGE_EXTENSIONS.includes(ext)
+}
+
+/**
+ * Check if a file extension is a video type
+ */
+export function isVideoExtension(extension: string): boolean {
+  const ext = extension.toLowerCase()
+  return VIDEO_EXTENSIONS.includes(ext)
 }
 
 /**

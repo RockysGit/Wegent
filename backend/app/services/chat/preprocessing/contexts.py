@@ -142,7 +142,9 @@ async def process_contexts(
 
             # Process based on context type
             if context.context_type == ContextType.ATTACHMENT.value:
-                _process_attachment_context(context, idx, text_contents, image_contents)
+                _process_attachment_context(
+                    context, idx, text_contents, image_contents, db=db
+                )
             elif context.context_type == ContextType.KNOWLEDGE_BASE.value:
                 # Knowledge base contexts are handled via RAG tools, not here
                 logger.debug(
@@ -213,17 +215,23 @@ def _build_vision_structure(
         )
         content.append({"type": "input_text", "text": attachment_text})
 
-    # 2. Image blocks
-    for img in image_contents:
-        image_base64 = img.get("image_base64", "")
-        mime_type = img.get("mime_type", "image/jpeg")
-        if image_base64:
-            content.append(
-                {
-                    "type": "input_image",
-                    "image_url": f"data:{mime_type};base64,{image_base64}",
-                }
-            )
+    # 2. Media blocks (images and videos)
+    for media in image_contents:
+        content_type = media.get("content_type", "image")
+        if content_type == "video":
+            video_block = media.get("video_block")
+            if video_block:
+                content.append(video_block)
+        else:
+            image_base64 = media.get("image_base64", "")
+            mime_type = media.get("mime_type", "image/jpeg")
+            if image_base64:
+                content.append(
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{mime_type};base64,{image_base64}",
+                    }
+                )
 
     # 3. User message as its own text block — keeps it isolated from attachment
     #    metadata so the model sees the question without extra noise, and so the
@@ -264,6 +272,7 @@ def _process_attachment_context(
     image_contents: List[dict],
     task_id: Optional[int] = None,
     subtask_id: Optional[int] = None,
+    db: Optional[Session] = None,
 ) -> None:
     """
     Process an attachment context and add to appropriate list.
@@ -272,23 +281,21 @@ def _process_attachment_context(
         context: The SubtaskContext record
         idx: Attachment index (for labeling)
         text_contents: List to append text content to
-        image_contents: List to append image content to
+        image_contents: List to append image/video content to
         task_id: Optional task ID for building sandbox path
         subtask_id: Optional subtask ID for building sandbox path
+        db: Optional database session for reading video binary data
     """
+    attachment_id = context.id
+    filename = context.original_filename
+    mime_type = context.mime_type or "unknown"
+    file_size = context.file_size or 0
+    formatted_size = context_service.format_file_size(file_size)
+    url = context_service.build_attachment_url(attachment_id)
+    sandbox_path = context_service.build_sandbox_path(task_id, subtask_id, filename)
+
     # Check if it's an image attachment
     if context_service.is_image_context(context) and context.image_base64:
-        # Build image attachment metadata
-        attachment_id = context.id
-        filename = context.original_filename
-        mime_type = context.mime_type or "unknown"
-        file_size = context.file_size or 0
-        formatted_size = context_service.format_file_size(file_size)
-        url = context_service.build_attachment_url(attachment_id)
-
-        # Build sandbox path if task_id and subtask_id are provided
-        sandbox_path = context_service.build_sandbox_path(task_id, subtask_id, filename)
-
         # Build image metadata header with optional sandbox path
         if sandbox_path:
             image_header = (
@@ -304,12 +311,43 @@ def _process_attachment_context(
 
         image_contents.append(
             {
+                "content_type": "image",
                 "image_base64": context.image_base64,
                 "mime_type": context.mime_type,
                 "filename": context.original_filename,
                 "id": attachment_id,
                 "url": url,
                 "image_header": image_header,
+            }
+        )
+    elif context_service.is_video_context(context):
+        # Build video attachment metadata
+        if sandbox_path:
+            video_header = (
+                f"[Video Attachment: {filename} | ID: {attachment_id} | "
+                f"Type: {mime_type} | Size: {formatted_size} | URL: {url} | "
+                f"File Path(already in sandbox): {sandbox_path}]"
+            )
+        else:
+            video_header = (
+                f"[Video Attachment: {filename} | ID: {attachment_id} | "
+                f"Type: {mime_type} | Size: {formatted_size} | URL: {url}]"
+            )
+
+        # Build video content block if db is available
+        video_block = None
+        if db is not None:
+            video_block = context_service.build_video_content_block(context, db)
+
+        image_contents.append(
+            {
+                "content_type": "video",
+                "video_block": video_block,
+                "mime_type": context.mime_type,
+                "filename": context.original_filename,
+                "id": attachment_id,
+                "url": url,
+                "image_header": video_header,
             }
         )
     else:
@@ -1018,6 +1056,7 @@ async def prepare_contexts_for_chat(
         message,
         task_id=task_id,
         subtask_id=user_subtask_id,
+        db=db,
     )
 
     # 2. Process knowledge base contexts - create tools
@@ -1139,6 +1178,7 @@ async def _process_attachment_contexts_for_message(
     message: str,
     task_id: Optional[int] = None,
     subtask_id: Optional[int] = None,
+    db: Optional[Session] = None,
 ) -> str | list[dict[str, Any]]:
     """
     Process attachment contexts and build message with content.
@@ -1148,9 +1188,10 @@ async def _process_attachment_contexts_for_message(
         message: Original user message
         task_id: Optional task ID for building sandbox path
         subtask_id: Optional subtask ID for building sandbox path
+        db: Optional database session for reading video binary data
     Returns:
         Message with attachment contents prepended, or OpenAI Responses API
-        format vision content list for images
+        format vision content list for images/videos
     """
     if not attachment_contexts:
         return message
@@ -1167,6 +1208,7 @@ async def _process_attachment_contexts_for_message(
                 image_contents,
                 task_id=task_id,
                 subtask_id=subtask_id,
+                db=db,
             )
         except Exception as e:
             logger.exception(f"Error processing attachment context {context.id}: {e}")
