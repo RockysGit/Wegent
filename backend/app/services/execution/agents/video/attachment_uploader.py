@@ -54,7 +54,7 @@ async def upload_video_attachment(
             name=f"video_{task_id}_{subtask_id}.mp4",
             status=ContextStatus.READY.value,
             type_data={
-                "file_extension": "mp4",
+                "file_extension": ".mp4",
                 "file_size": video_size,
                 "mime_type": "video/mp4",
                 "video_metadata": {

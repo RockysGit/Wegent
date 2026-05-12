@@ -636,18 +636,26 @@ class ContextService:
             Video content block dict, or None if not a video or no binary data
         """
         if not self.is_video_context(context):
+            logger.debug(
+                f"[build_video_content_block] Not a video context: id={context.id}, "
+                f"file_extension={context.file_extension}"
+            )
             return None
 
         binary_data = self.get_attachment_binary_data(db=db, context=context)
         if not binary_data:
+            logger.warning(
+                f"[build_video_content_block] No binary data for video: id={context.id}, "
+                f"storage_key={context.storage_key}"
+            )
             return None
 
         import base64
 
         video_base64 = base64.b64encode(binary_data).decode("utf-8")
         return {
-            "type": "input_video",
-            "video_url": f"data:{context.mime_type};base64,{video_base64}",
+            "type": "video_url",
+            "video_url": {"url": f"data:{context.mime_type};base64,{video_base64}"},
             "fps": 2,
         }
 

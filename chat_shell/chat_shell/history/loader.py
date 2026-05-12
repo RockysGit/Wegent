@@ -544,7 +544,7 @@ def _build_history_messages(
         subtask_id = subtask.id
 
         for attachment in attachments:
-            vision_block = _build_vision_content_block(attachment)
+            vision_block = _build_vision_content_block(attachment, db=db)
             if vision_block:
                 vision_parts.append(vision_block)
                 # Add image metadata header for reference in text content
@@ -735,17 +735,34 @@ def _build_history_messages(
     return []
 
 
-def _build_vision_content_block(context) -> dict[str, Any] | None:
-    """Build a vision content block from a context if it's an image or video."""
+def _build_vision_content_block(context, db=None) -> dict[str, Any] | None:
+    """Build a vision content block from a context if it's an image or video.
+
+    For attachments stored in external storage backends (binary_data is empty),
+    reads binary data from the storage backend when ``db`` is provided.
+    """
     if not context.mime_type:
         return None
 
-    if not context.binary_data:
+    binary_data = context.binary_data
+
+    # Fallback to storage backend when binary_data is empty and db is available
+    if not binary_data and db is not None:
+        try:
+            from app.services.context import context_service
+
+            binary_data = context_service.get_attachment_binary_data(
+                db=db, context=context
+            )
+        except Exception:
+            binary_data = None
+
+    if not binary_data:
         return None
 
     import base64
 
-    encoded_data = base64.b64encode(context.binary_data).decode("utf-8")
+    encoded_data = base64.b64encode(binary_data).decode("utf-8")
 
     if context.mime_type.startswith("video/"):
         return {

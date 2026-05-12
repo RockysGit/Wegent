@@ -221,11 +221,24 @@ def _build_vision_structure(
         if content_type == "video":
             video_block = media.get("video_block")
             if video_block:
+                logger.info(
+                    f"[_build_vision_structure] Appending video block: "
+                    f"type={video_block.get('type')}, mime_type={media.get('mime_type')}"
+                )
                 content.append(video_block)
+            else:
+                logger.warning(
+                    f"[_build_vision_structure] Video block is None for attachment "
+                    f"id={media.get('id')}, filename={media.get('filename')}"
+                )
         else:
             image_base64 = media.get("image_base64", "")
             mime_type = media.get("mime_type", "image/jpeg")
             if image_base64:
+                logger.info(
+                    f"[_build_vision_structure] Appending image block: "
+                    f"mime_type={mime_type}, attachment_id={media.get('id')}"
+                )
                 content.append(
                     {
                         "type": "input_image",
@@ -295,7 +308,15 @@ def _process_attachment_context(
     sandbox_path = context_service.build_sandbox_path(task_id, subtask_id, filename)
 
     # Check if it's an image attachment
-    if context_service.is_image_context(context) and context.image_base64:
+    is_image = context_service.is_image_context(context)
+    is_video = context_service.is_video_context(context)
+    logger.info(
+        f"[_process_attachment_context] id={attachment_id}, filename={filename}, "
+        f"mime_type={mime_type}, is_image={is_image}, is_video={is_video}, "
+        f"has_image_base64={bool(context.image_base64)}"
+    )
+
+    if is_image and context.image_base64:
         # Build image metadata header with optional sandbox path
         if sandbox_path:
             image_header = (
@@ -338,6 +359,11 @@ def _process_attachment_context(
         video_block = None
         if db is not None:
             video_block = context_service.build_video_content_block(context, db)
+
+        logger.info(
+            f"[_process_attachment_context] Video block built: id={attachment_id}, "
+            f"has_video_block={video_block is not None}"
+        )
 
         image_contents.append(
             {

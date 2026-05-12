@@ -100,6 +100,28 @@ class ClaudeProvider(LLMProvider):
                                     },
                                 }
                             )
+                    elif block.get("type") == "video_url":
+                        video_url_data = block.get("video_url", {})
+                        video_url = (
+                            video_url_data.get("url", "")
+                            if isinstance(video_url_data, dict)
+                            else ""
+                        )
+                        parsed = _parse_base64_image(video_url)
+                        if parsed:
+                            media_type, base64_data = parsed
+                            video_block = {
+                                "type": "video",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": base64_data,
+                                },
+                            }
+                            fps = block.get("fps")
+                            if fps is not None:
+                                video_block["fps"] = fps
+                            claude_content.append(video_block)
                 formatted.append({"role": role, "content": claude_content})
             else:
                 formatted.append({"role": role, "content": content})

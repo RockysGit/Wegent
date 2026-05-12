@@ -284,9 +284,10 @@ class MessageConverter:
                     )
 
             elif block_type in ("video_url", "input_video"):
-                # Convert to Anthropic video format
-                # input_video from backend: {type: "input_video", video_url: "data:...;base64,...", fps: 2}
-                # video_url legacy: {type: "video_url", video_url: {url: "data:..."}}
+                # Accept OpenAI Responses API video format and legacy input_video,
+                # then convert to Anthropic video format for LangChain/Anthropic.
+                # LangChain's ChatAnthropic passes through unknown block types
+                # as-is, so we must emit native Anthropic "video" blocks here.
                 if block_type == "input_video":
                     data_uri = block.get("video_url", "")
                 else:
@@ -300,7 +301,7 @@ class MessageConverter:
                 if data_uri and data_uri.startswith("data:"):
                     header, b64_data = data_uri.split(",", 1)
                     media_type = header.split(":")[1].split(";")[0]
-                    video_block = {
+                    video_block: dict[str, Any] = {
                         "type": "video",
                         "source": {
                             "type": "base64",
@@ -455,7 +456,8 @@ class MessageConverter:
         if isinstance(content, list):
             return any(
                 isinstance(part, dict)
-                and part.get("type") in ("image_url", "video", "input_video")
+                and part.get("type")
+                in ("image_url", "video_url", "video", "input_video")
                 for part in content
             )
         return False

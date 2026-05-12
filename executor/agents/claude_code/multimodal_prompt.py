@@ -46,7 +46,7 @@ def is_vision_prompt(prompt: Union[str, list]) -> bool:
         return False
     return any(
         isinstance(block, dict)
-        and block.get("type") in ("input_image", "image", "input_video")
+        and block.get("type") in ("input_image", "image", "input_video", "video_url")
         for block in prompt
     )
 
@@ -131,21 +131,30 @@ def convert_openai_to_anthropic_content(
                 }
             )
 
-        elif block_type == "input_video":
-            video_url = block.get("video_url", "")
-            media_type, data = _parse_data_uri(video_url)
-            video_block = {
-                "type": "video",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": data,
-                },
-            }
-            fps = block.get("fps")
-            if fps is not None:
-                video_block["fps"] = fps
-            anthropic_blocks.append(video_block)
+        elif block_type in ("input_video", "video_url"):
+            if block_type == "input_video":
+                video_url = block.get("video_url", "")
+            else:
+                video_url_data = block.get("video_url", {})
+                video_url = (
+                    video_url_data.get("url", "")
+                    if isinstance(video_url_data, dict)
+                    else ""
+                )
+            if video_url:
+                media_type, data = _parse_data_uri(video_url)
+                video_block = {
+                    "type": "video",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data,
+                    },
+                }
+                fps = block.get("fps")
+                if fps is not None:
+                    video_block["fps"] = fps
+                anthropic_blocks.append(video_block)
 
         else:
             # Pass through unknown block types as-is
