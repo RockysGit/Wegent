@@ -36,6 +36,7 @@ from app.services.channels.commands import (
     AGENT_ITEM_TEMPLATE,
     AGENTS_EMPTY,
     AGENTS_FOOTER,
+    AGENTS_FOOTER_GROUP,
     AGENTS_HEADER,
     DEVICE_ITEM_TEMPLATE,
     DEVICES_EMPTY,
@@ -57,6 +58,10 @@ from app.services.channels.device_selection import (
     device_selection_manager,
 )
 from app.services.channels.emitter import SyncResponseEmitter
+from app.services.channels.group_agent_binding import (
+    GroupAgentBinding,
+    group_agent_binding_manager,
+)
 from app.services.channels.model_selection import (
     ModelSelection,
     is_claude_provider,
@@ -468,22 +473,89 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
 
         return team
 
-    async def _get_selected_or_default_team(
-        self, db: Session, user_id: int
+    async def _get_group_bound_team(
+        self,
+        db: Session,
+        message_context: MessageContext,
     ) -> Optional[Kind]:
-        """Get user's selected team or fall back to default team.
+        """Get team bound to the group conversation.
 
-        This method checks if the user has manually selected a team via /agents
-        command. If so, returns that team. Otherwise, falls back to the
-        channel's configured default team.
+        For group chats, checks if an agent has been bound to the conversation.
+        The last user who bound an agent wins. Returns None for private chats
+        or if no binding exists.
 
         Args:
             db: Database session
-            user_id: User ID
+            message_context: Message context with conversation info
 
         Returns:
             Team Kind object or None
         """
+        if message_context.conversation_type != "group":
+            return None
+
+        binding = await group_agent_binding_manager.get_binding(
+            channel_type=self._channel_type.value,
+            conversation_id=message_context.conversation_id,
+        )
+
+        if not binding:
+            return None
+
+        team = (
+            db.query(Kind)
+            .filter(
+                Kind.id == binding.team_id,
+                Kind.kind == "Team",
+                Kind.is_active == True,
+            )
+            .first()
+        )
+
+        if team:
+            self.logger.info(
+                f"[{self._channel_type.value}Handler] Using group-bound team: "
+                f"{team.name} (id={team.id}, bound_by={binding.bound_by_user_name})"
+            )
+            return team
+        else:
+            self.logger.warning(
+                f"[{self._channel_type.value}Handler] Group-bound team not found "
+                f"or inactive: id={binding.team_id}, clearing binding"
+            )
+            await group_agent_binding_manager.clear_binding(
+                channel_type=self._channel_type.value,
+                conversation_id=message_context.conversation_id,
+            )
+            return None
+
+    async def _get_selected_or_default_team(
+        self,
+        db: Session,
+        user_id: int,
+        message_context: Optional[MessageContext] = None,
+    ) -> Optional[Kind]:
+        """Get user's selected team or fall back to default team.
+
+        For group chats, checks group-agent binding first (last user who bound
+        an agent wins). For private chats or when no group binding exists,
+        checks if the user has manually selected a team via /agents command.
+        Falls back to the channel's configured default team.
+
+        Args:
+            db: Database session
+            user_id: User ID
+            message_context: Optional message context for group binding lookup
+
+        Returns:
+            Team Kind object or None
+        """
+        # For group chats, check group-agent binding first
+        if message_context and message_context.conversation_type == "group":
+            group_team = await self._get_group_bound_team(db, message_context)
+            if group_team:
+                return group_team
+
         from app.services.channels.team_selection import team_selection_manager
 
         # Check if user has a manually selected team
@@ -1172,43 +1244,68 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
             mode = "☁️ 云端执行模式"
             device_info = ""
 
-        # Get team - prioritize user selection over default
-        from app.services.channels.team_selection import team_selection_manager
+        # Get team - prioritize group binding (for group chats), then user selection, then default
+        team = None
+        team_source = ""
 
-        team_selection = await team_selection_manager.get_selection(user.id)
-        if team_selection:
-            team = (
-                db.query(Kind)
-                .filter(
-                    Kind.id == team_selection.team_id,
-                    Kind.kind == "Team",
-                    Kind.is_active == True,
-                )
-                .first()
+        # Check if we're in a group chat with a bound agent
+        if message_context and message_context.conversation_type == "group":
+            group_binding = await group_agent_binding_manager.get_binding(
+                channel_type=self._channel_type.value,
+                conversation_id=message_context.conversation_id,
             )
-            if team:
-                team_json = team.json or {}
-                team_spec = team_json.get("spec", {})
-                display = team_spec.get("displayName") or team.name
-                team_name = f"{display} (用户选择)"
-            else:
-                # Selected team no longer exists, clear it
-                await team_selection_manager.clear_selection(user.id)
-                team = self._get_default_team(db, user.id)
+            if group_binding:
+                team = (
+                    db.query(Kind)
+                    .filter(
+                        Kind.id == group_binding.team_id,
+                        Kind.kind == "Team",
+                        Kind.is_active == True,
+                    )
+                    .first()
+                )
                 if team:
-                    team_json = team.json or {}
-                    team_spec = team_json.get("spec", {})
-                    team_name = team_spec.get("displayName") or team.name
+                    team_source = f" (群绑定 by {group_binding.bound_by_user_name})"
                 else:
-                    team_name = "未配置"
-        else:
+                    # Bound team no longer exists, clear binding
+                    await group_agent_binding_manager.clear_binding(
+                        channel_type=self._channel_type.value,
+                        conversation_id=message_context.conversation_id,
+                    )
+
+        # If no group binding, check user selection
+        if not team:
+            from app.services.channels.team_selection import team_selection_manager
+
+            team_selection = await team_selection_manager.get_selection(user.id)
+            if team_selection:
+                team = (
+                    db.query(Kind)
+                    .filter(
+                        Kind.id == team_selection.team_id,
+                        Kind.kind == "Team",
+                        Kind.is_active == True,
+                    )
+                    .first()
+                )
+                if team:
+                    team_source = " (用户选择)"
+                else:
+                    # Selected team no longer exists, clear it
+                    await team_selection_manager.clear_selection(user.id)
+
+        # Fall back to default team
+        if not team:
             team = self._get_default_team(db, user.id)
             if team:
-                team_json = team.json or {}
-                team_spec = team_json.get("spec", {})
-                team_name = team_spec.get("displayName") or team.name
-            else:
-                team_name = "未配置"
+                team_source = ""
+
+        if team:
+            team_json = team.json or {}
+            team_spec = team_json.get("spec", {})
+            team_name = f"{team_spec.get('displayName') or team.name}{team_source}"
+        else:
+            team_name = "未配置"
 
         # Get model selection
         # For device mode, show the actual model that will be used (may be default device model)
@@ -1427,6 +1524,9 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
         teams/agents. Users can switch between personal teams, shared teams,
         and system teams at any time during the conversation.
 
+        In group chats, the agent selection is bound to the group (conversation)
+        rather than individual users. The last user who binds an agent wins.
+
         Args:
             db: Database session
             user: Wegent user
@@ -1461,7 +1561,16 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
 
             # Support "default" to revert to system default
             if argument == "default":
-                await team_selection_manager.clear_selection(user.id)
+                if message_context.conversation_type == "group":
+                    # In group chat, clear group binding
+                    await group_agent_binding_manager.clear_binding(
+                        channel_type=self._channel_type.value,
+                        conversation_id=message_context.conversation_id,
+                    )
+                else:
+                    # In private chat, clear user selection
+                    await team_selection_manager.clear_selection(user.id)
+
                 await self._delete_conversation_task_id(
                     message_context.conversation_id, user.id
                 )
@@ -1514,41 +1623,85 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
                 )
                 return
 
-            # Save selection to Redis
             # matched_team is a dictionary from team_kinds_service.get_user_teams()
             display_name = matched_team.get("name") or "Unnamed"
             matched_team_id = matched_team.get("id")
             matched_team_name = matched_team.get("name") or "Unnamed"
             matched_team_namespace = matched_team.get("namespace") or "default"
 
-            await team_selection_manager.set_selection(
-                user.id,
-                TeamSelection(
-                    team_id=matched_team_id,
-                    team_name=matched_team_name,
-                    team_namespace=matched_team_namespace,
-                    display_name=display_name,
-                ),
-            )
+            if message_context.conversation_type == "group":
+                # In group chat: bind agent to the group
+                await group_agent_binding_manager.set_binding(
+                    channel_type=self._channel_type.value,
+                    conversation_id=message_context.conversation_id,
+                    binding=GroupAgentBinding(
+                        team_id=matched_team_id,
+                        team_name=matched_team_name,
+                        team_namespace=matched_team_namespace,
+                        display_name=display_name,
+                        bound_by_user_id=user.id,
+                        bound_by_user_name=user.user_name,
+                    ),
+                )
 
-            # Clear conversation cache to start fresh with new team
-            await self._delete_conversation_task_id(
-                message_context.conversation_id, user.id
-            )
+                # Clear conversation cache to start fresh with new team
+                await self._delete_conversation_task_id(
+                    message_context.conversation_id, user.id
+                )
 
-            await self.send_text_reply(
-                message_context,
-                f"✅ 已切换到智能体: **{display_name}**\n\n"
-                f"命名空间: `{matched_team_namespace}`\n"
-                f"💡 现在开始使用新智能体进行对话",
-            )
+                await self.send_text_reply(
+                    message_context,
+                    f"✅ 已绑定智能体到本群: **{display_name}**\n\n"
+                    f"命名空间: `{matched_team_namespace}`\n"
+                    f"绑定用户: {user.user_name}\n"
+                    f"💡 本群所有成员现在将使用该智能体进行对话",
+                )
+            else:
+                # In private chat: save to user selection
+                await team_selection_manager.set_selection(
+                    user.id,
+                    TeamSelection(
+                        team_id=matched_team_id,
+                        team_name=matched_team_name,
+                        team_namespace=matched_team_namespace,
+                        display_name=display_name,
+                    ),
+                )
+
+                # Clear conversation cache to start fresh with new team
+                await self._delete_conversation_task_id(
+                    message_context.conversation_id, user.id
+                )
+
+                await self.send_text_reply(
+                    message_context,
+                    f"✅ 已切换到智能体: **{display_name}**\n\n"
+                    f"命名空间: `{matched_team_namespace}`\n"
+                    f"💡 现在开始使用新智能体进行对话",
+                )
             return
 
         # No argument - list teams
-        current_selection = await team_selection_manager.get_selection(user.id)
-        current_team_id = current_selection.team_id if current_selection else None
-
         message = AGENTS_HEADER + "\n"
+
+        # Determine current team for display
+        current_team_id = None
+        is_group_bound = False
+
+        if message_context.conversation_type == "group":
+            # In group chat, check group binding
+            group_binding = await group_agent_binding_manager.get_binding(
+                channel_type=self._channel_type.value,
+                conversation_id=message_context.conversation_id,
+            )
+            if group_binding:
+                current_team_id = group_binding.team_id
+                is_group_bound = True
+        else:
+            # In private chat, check user selection
+            current_selection = await team_selection_manager.get_selection(user.id)
+            if current_selection:
+                current_team_id = current_selection.team_id
 
         for idx, team in enumerate(teams, start=1):
             # team is a dictionary from team_kinds_service.get_user_teams()
@@ -1559,7 +1712,10 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
             # Build status string
             status_parts = []
             if team_id == current_team_id:
-                status_parts.append("⭐ 当前")
+                if is_group_bound:
+                    status_parts.append("⭐ 群绑定")
+                else:
+                    status_parts.append("⭐ 当前")
             if team_id == self.default_team_id:
                 status_parts.append("系统默认")
 
@@ -1572,7 +1728,10 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
                 status=status_str,
             )
 
-        message += AGENTS_FOOTER
+        if message_context.conversation_type == "group":
+            message += AGENTS_FOOTER_GROUP
+        else:
+            message += AGENTS_FOOTER
         await self.send_text_reply(message_context, message)
 
     async def _process_chat_message(
@@ -1912,7 +2071,9 @@ class BaseChannelHandler(ABC, Generic[TMessage, TCallbackInfo]):
         # Prevent attribute expiration after commit so ORM objects remain usable
         db.expire_on_commit = False
         try:
-            team = await self._get_selected_or_default_team(db, user.id)
+            team = await self._get_selected_or_default_team(
+                db, user.id, message_context
+            )
             if not team:
                 return "配置错误: 未配置默认智能体"
 

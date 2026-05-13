@@ -119,6 +119,7 @@ HELP_MESSAGE = """📋 **可用命令**
 
 **说明**
 • **智能体**: 执行任务的 AI 代理，在 Web 端可创建和配置
+• **群聊绑定**: 在群聊中使用 `/agents` 会将智能体绑定到本群，所有成员共享。最后一个执行绑定的用户决定当前群使用的智能体
 
 **设备管理**
 • `/devices` - 查看在线设备列表
@@ -174,6 +175,7 @@ AGENTS_HEADER = "🤖 **可用智能体列表**\n"
 AGENTS_EMPTY = "暂无可用智能体\n\n💡 请在 Web 端创建智能体后使用"
 AGENT_ITEM_TEMPLATE = "{index}. **{name}** ({namespace}){status}\n"
 AGENTS_FOOTER = "\n💡 使用 `/agents <序号>` 或 `/agents <智能体名>` 切换智能体\n💡 使用 `/agents default` 恢复系统默认"
+AGENTS_FOOTER_GROUP = "\n💡 使用 `/agents <序号>` 或 `/agents <智能体名>` 绑定智能体到本群\n💡 使用 `/agents default` 恢复系统默认"
 
 
 # IM Channel context hint for AI
@@ -183,7 +185,7 @@ IM_CHANNEL_CONTEXT_HINT = """
 ---
 [系统提示] 当前为 IM 频道对话模式，用户可以使用以下斜杠命令（直接输入命令即可，无需 AI 执行）：
 - `/agents` - 查看可用智能体列表
-- `/agents <序号>` - 切换到指定智能体
+- `/agents <序号>` - 切换到指定智能体（私聊：个人选择；群聊：绑定到本群）
 - `/agents default` - 恢复使用系统默认智能体
 - `/devices` - 查看在线设备列表
 - `/devices <序号|设备名>` - 切换到指定设备进入设备模式
@@ -195,5 +197,7 @@ IM_CHANNEL_CONTEXT_HINT = """
 - `/status` - 查看当前状态
 - `/new` - 开始新对话
 - `/help` - 显示完整帮助
+
+**群聊说明**：在群聊中使用 `/agents <序号>` 会将智能体绑定到本群，群内所有成员共享该智能体。最后一个执行绑定操作的用户决定当前群使用的智能体。
 
 如果用户询问如何切换智能体、模型、使用设备、执行模式等问题，请引导用户使用上述命令。"""
