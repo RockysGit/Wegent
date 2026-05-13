@@ -27,7 +27,7 @@ function getToolInputPreview(
   maxLength: number = 60
 ): string | null {
   const input = tool.toolUse?.details?.input as Record<string, unknown> | string | undefined
-  if (!input) return null
+  if (!hasMeaningfulToolInput(input)) return null
 
   const toolName = tool.toolName
 
@@ -105,6 +105,17 @@ function getToolInputPreview(
   }
 
   return null
+}
+
+function hasMeaningfulToolInput(input: Record<string, unknown> | string | undefined): boolean {
+  if (!input) return false
+  if (typeof input === 'string') {
+    const trimmed = input.trim()
+    if (!trimmed) return false
+    if (trimmed === '{}' || trimmed === '[]') return false
+    return true
+  }
+  return Object.keys(input).length > 0
 }
 
 /**
@@ -199,11 +210,9 @@ export const ToolBlock = memo(function ToolBlock({
   const inputPreview = useMemo(() => getToolInputPreview(tool), [tool])
 
   // Check if expandable (has content to show)
-  const hasInput =
-    tool.toolUse?.details?.input &&
-    (typeof tool.toolUse.details.input === 'string'
-      ? tool.toolUse.details.input.length > 0
-      : Object.keys(tool.toolUse.details.input).length > 0)
+  const hasInput = hasMeaningfulToolInput(
+    tool.toolUse?.details?.input as Record<string, unknown> | string | undefined
+  )
   const hasOutput = tool.toolResult?.details?.output || tool.toolResult?.details?.content
   const hasContent = hasInput || hasOutput
   const isExpandable = hasContent
@@ -228,7 +237,11 @@ export const ToolBlock = memo(function ToolBlock({
     <div className="mb-1">
       {/* Compact inline block - pill style with border and rounded corners */}
       <div
-        className={`inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 bg-[#f7f7f8] dark:bg-[#2a2a2a] border border-[#e5e5e5] dark:border-[#3a3a3a] rounded-xl ${
+        className={`inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 border rounded-xl ${
+          hasError
+            ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+            : 'bg-[#f7f7f8] dark:bg-[#2a2a2a] border-[#e5e5e5] dark:border-[#3a3a3a]'
+        } ${
           canExpand
             ? 'cursor-pointer hover:bg-[#f0f0f0] dark:hover:bg-[#333] hover:border-[#ddd] dark:hover:border-[#444]'
             : 'cursor-default'
@@ -239,6 +252,8 @@ export const ToolBlock = memo(function ToolBlock({
         <div className="flex items-center justify-center w-4 h-4 bg-white dark:bg-[#3a3a3a] border border-[#e8e8e8] dark:border-[#444] rounded-md flex-shrink-0">
           {isRunning ? (
             <Loader2 className="w-2.5 h-2.5 text-[#888] dark:text-[#999] animate-spin" />
+          ) : hasError ? (
+            <AlertCircle className="w-2.5 h-2.5 text-red-500" />
           ) : (
             <ToolIcon className="w-2.5 h-2.5 text-[#888] dark:text-[#999]" />
           )}
@@ -279,11 +294,9 @@ export const ToolBlock = memo(function ToolBlock({
             const CurrentToolRenderer = getToolRenderer(toolItem.toolName)
             const preview = getToolInputPreview(toolItem, 80)
             // Check if tool has content to render
-            const toolHasInput =
-              toolItem.toolUse?.details?.input &&
-              (typeof toolItem.toolUse.details.input === 'string'
-                ? toolItem.toolUse.details.input.length > 0
-                : Object.keys(toolItem.toolUse.details.input).length > 0)
+            const toolHasInput = hasMeaningfulToolInput(
+              toolItem.toolUse?.details?.input as Record<string, unknown> | string | undefined
+            )
             const toolHasOutput =
               toolItem.toolResult?.details?.output || toolItem.toolResult?.details?.content
             const toolHasContent = toolHasInput || toolHasOutput

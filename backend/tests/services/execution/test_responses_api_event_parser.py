@@ -216,6 +216,51 @@ class TestResponsesAPIEventParserToolIds:
         assert done.data["tool_protocol"] == "mcp_call"
         assert done.data["status"] == "completed"
 
+    def test_mcp_tool_completion_carries_output(self):
+        parser = ResponsesAPIEventParser()
+
+        parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.OUTPUT_ITEM_ADDED.value,
+            data={
+                "item": {
+                    "type": "mcp_call",
+                    "id": "mcp_789",
+                    "name": "search_docs",
+                    "server_label": "wegent-knowledge",
+                }
+            },
+        )
+        parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.MCP_CALL_ARGUMENTS_DONE.value,
+            data={
+                "item_id": "mcp_789",
+                "arguments": '{"query": "tool blocks"}',
+            },
+        )
+
+        done = parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.MCP_CALL_COMPLETED.value,
+            data={
+                "item_id": "mcp_789",
+                "output": '{"results":["block output"]}',
+            },
+        )
+
+        assert done is not None
+        assert done.type == "tool_result"
+        assert done.tool_use_id == "mcp_789"
+        assert done.tool_output == '{"results":["block output"]}'
+        assert done.tool_input == {"query": "tool blocks"}
+
     def test_mcp_tool_failed_carries_error(self):
         parser = ResponsesAPIEventParser()
 
@@ -239,7 +284,7 @@ class TestResponsesAPIEventParserToolIds:
             subtask_id=2,
             message_id=3,
             event_type=ResponsesAPIStreamEvents.MCP_CALL_FAILED.value,
-            data={"item_id": "mcp_456", "error": "timeout"},
+            data={"item_id": "mcp_456", "failure_reason": "timeout"},
         )
 
         assert failed is not None
@@ -308,7 +353,7 @@ class TestResponsesAPIEventParserToolIds:
         assert done.data["tool_protocol"] == "shell_call"
         assert done.data["status"] == "completed"
 
-    def test_tool_result_without_context_is_skipped(self):
+    def test_tool_result_without_context_still_updates_block(self):
         parser = ResponsesAPIEventParser()
 
         result = parser.parse(
@@ -323,7 +368,69 @@ class TestResponsesAPIEventParserToolIds:
             },
         )
 
-        assert result is None
+        assert result is not None
+        assert result.type == "tool_result"
+        assert result.tool_use_id == "missing_tool"
+        assert result.tool_name is None
+        assert result.tool_input == {"path": "/tmp/test.py"}
+        assert result.tool_output == "done"
+        assert result.data["tool_protocol"] == "function_call"
+
+    def test_mcp_tool_completion_without_context_still_updates_block(self):
+        parser = ResponsesAPIEventParser()
+
+        result = parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.MCP_CALL_COMPLETED.value,
+            data={
+                "item_id": "missing_mcp_tool",
+                "output": '{"results":["ok"]}',
+            },
+        )
+
+        assert result is not None
+        assert result.type == "tool_result"
+        assert result.tool_use_id == "missing_mcp_tool"
+        assert result.tool_name is None
+        assert result.tool_input is None
+        assert result.tool_output == '{"results":["ok"]}'
+        assert result.data["tool_protocol"] == "mcp_call"
+        assert result.data["status"] == "completed"
+
+    def test_shell_tool_completion_without_context_still_updates_block(self):
+        parser = ResponsesAPIEventParser()
+
+        result = parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.OUTPUT_ITEM_DONE.value,
+            data={
+                "item": {
+                    "type": "shell_call",
+                    "id": "shell_123",
+                    "call_id": "shell_123",
+                    "name": "exec",
+                    "status": "completed",
+                    "input": {"working_directory": "/tmp"},
+                    "action": {"commands": ["ls -la"], "timeout_ms": 5000},
+                }
+            },
+        )
+
+        assert result is not None
+        assert result.type == "tool_result"
+        assert result.tool_use_id == "shell_123"
+        assert result.tool_name == "exec"
+        assert result.tool_input == {
+            "working_directory": "/tmp",
+            "command": "ls -la",
+            "timeout_seconds": 5,
+        }
+        assert result.data["tool_protocol"] == "shell_call"
+        assert result.data["status"] == "completed"
 
     def test_tool_context_is_scoped_by_task_and_subtask(self):
         parser = ResponsesAPIEventParser()
@@ -477,6 +584,48 @@ class TestResponsesAPIEventParserToolIds:
                 message_id=3,
             )
 
+    def test_inprocess_bridge_mcp_completion_carries_output(self):
+        transport = EmitterBridgeTransport(
+            emitter=AsyncMock(),
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+        )
+
+        transport._convert_event(
+            ResponsesAPIStreamEvents.OUTPUT_ITEM_ADDED.value,
+            {
+                "item": {
+                    "type": "mcp_call",
+                    "id": "mcp_789",
+                    "name": "search_docs",
+                    "server_label": "wegent-knowledge",
+                }
+            },
+            message_id=3,
+        )
+        transport._convert_event(
+            ResponsesAPIStreamEvents.MCP_CALL_ARGUMENTS_DONE.value,
+            {
+                "item_id": "mcp_789",
+                "arguments": '{"query": "tool blocks"}',
+            },
+            message_id=3,
+        )
+
+        result = transport._convert_event(
+            ResponsesAPIStreamEvents.MCP_CALL_COMPLETED.value,
+            {
+                "item_id": "mcp_789",
+                "output": '{"results":["block output"]}',
+            },
+            message_id=3,
+        )
+
+        assert result is not None
+        assert result.tool_output == '{"results":["block output"]}'
+        assert result.tool_input == {"query": "tool blocks"}
+
     def test_inprocess_bridge_shell_call_lifecycle(self):
         transport = EmitterBridgeTransport(
             emitter=AsyncMock(),
@@ -560,3 +709,101 @@ class TestResponsesAPIEventParserToolIds:
         )
 
         assert parser._tool_contexts == {}
+
+
+class TestMcpCallFailedEventParsing:
+    """Regression tests for MCP tool failure event parsing.
+
+    Root cause: response.mcp_call.failed used "error" as top-level key, which
+    triggered OpenAI SDK's error detection in _streaming.py, causing the entire
+    SSE stream to terminate with "An error occurred during streaming" instead of
+    letting the LLM handle the failure gracefully.
+
+    Fix: renamed "error" to "failure_reason" in mcp_call_failed() so the SDK
+    no longer misidentifies it as a fatal streaming error.
+    """
+
+    def _setup_mcp_in_progress(
+        self, parser: ResponsesAPIEventParser, item_id: str
+    ) -> None:
+        """Register MCP call context via OUTPUT_ITEM_ADDED."""
+        parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.OUTPUT_ITEM_ADDED.value,
+            data={
+                "item": {
+                    "type": "mcp_call",
+                    "id": item_id,
+                    "name": "get_namespaces",
+                    "server_label": "kubernetes",
+                    "arguments": "{}",
+                }
+            },
+        )
+
+    def test_mcp_call_failed_produces_tool_result_with_failed_status(self):
+        """response.mcp_call.failed → TOOL_RESULT event with status=failed."""
+        from shared.models import EventType
+
+        parser = ResponsesAPIEventParser()
+        self._setup_mcp_in_progress(parser, "call_abc")
+
+        result = parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.MCP_CALL_FAILED.value,
+            data={
+                "item_id": "call_abc",
+                "failure_reason": "MCP tool 'get_namespaces' failed: Output validation error: 'context' is a required property",
+            },
+        )
+
+        assert result is not None
+        assert result.type == EventType.TOOL_RESULT
+        assert result.data["status"] == "failed"
+        assert result.data["tool_protocol"] == "mcp_call"
+        assert "get_namespaces" in result.data.get("error", "")
+
+    def test_mcp_call_failed_without_failure_reason(self):
+        """response.mcp_call.failed with no failure_reason still produces TOOL_RESULT."""
+        from shared.models import EventType
+
+        parser = ResponsesAPIEventParser()
+        self._setup_mcp_in_progress(parser, "call_xyz")
+
+        result = parser.parse(
+            task_id=1,
+            subtask_id=2,
+            message_id=3,
+            event_type=ResponsesAPIStreamEvents.MCP_CALL_FAILED.value,
+            data={"item_id": "call_xyz"},
+        )
+
+        assert result is not None
+        assert result.type == EventType.TOOL_RESULT
+        assert result.data["status"] == "failed"
+        assert result.data.get("error") is None
+
+    def test_mcp_call_failed_does_not_have_error_key_in_raw_event(self):
+        """mcp_call_failed builder must NOT use 'error' as top-level key.
+
+        The OpenAI SDK _streaming.py checks data.get('error') to detect fatal
+        streaming errors. A plain string value triggers the fallback message
+        'An error occurred during streaming' and raises APIError, killing the stream.
+        """
+        from shared.models.responses_api import ResponsesAPIEventBuilder
+
+        builder = ResponsesAPIEventBuilder(subtask_id=1, response_id="resp_1")
+        event = builder.mcp_call_failed(
+            item_id="call_1",
+            error="MCP tool 'get_namespaces' failed: Output validation error: 'context' is a required property",
+        )
+
+        assert "error" not in event, (
+            "mcp_call_failed must not use 'error' as top-level key — "
+            "it triggers OpenAI SDK fatal error detection in _streaming.py"
+        )
+        assert event.get("failure_reason") is not None
